@@ -17,13 +17,19 @@ limitations under the License.
 package policy
 
 import (
+	goflag "flag"
+	"sort"
 	"testing"
 
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
+	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/vastai"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -551,6 +557,116 @@ func TestSnapshotDevice(t *testing.T) {
 				originalUsedmem := d.Usedmem
 				tt.devices.DeviceLists[i].Device.Usedmem = 9999
 				assert.Equal(t, originalUsedmem, d.Usedmem)
+			}
+		})
+	}
+}
+
+// enableAscendForTest turns on the Ascend backend, which InitDevices gates
+// behind the --enable-ascend flag.
+func enableAscendForTest(t *testing.T) *ascend.Devices {
+	t.Helper()
+	fs := goflag.NewFlagSet("ascend", goflag.ContinueOnError)
+	ascend.ParseConfig(fs)
+	if err := fs.Parse([]string{"--enable-ascend=true"}); err != nil {
+		t.Fatalf("enable ascend: %v", err)
+	}
+	devs := ascend.InitDevices(ascend.VNPUs{Configs: []ascend.VNPUConfig{{CommonWord: "Ascend910B"}}})
+	if len(devs) == 0 {
+		t.Fatal("ascend InitDevices returned no devices")
+	}
+	return devs[0]
+}
+
+// TestOverrideScoreKeepsTopologyRankingUnderBothPolicies covers the backends
+// whose ScoreNode returns a policy-independent "higher is better" topology
+// score. OverrideScore owns the Spread sign inversion for them, so the node
+// with the better topology has to win under Spread just as it does under
+// Binpack. Before the PolicyNeutralScore markers were added these backends
+// were weighted with the wrong sign and Spread picked the worse topology.
+func TestOverrideScoreKeepsTopologyRankingUnderBothPolicies(t *testing.T) {
+	ascendDev := enableAscendForTest(t)
+
+	tests := []struct {
+		name    string
+		devType string
+		dev     device.Devices
+		better  device.ContainerDevices
+		worse   device.ContainerDevices
+	}{
+		{
+			name:    "ascend prefers devices on one network",
+			devType: "Ascend910B",
+			dev:     ascendDev,
+			better: device.ContainerDevices{
+				{Type: "Ascend910B", CustomInfo: map[string]any{"NetworkID": float64(0)}},
+				{Type: "Ascend910B", CustomInfo: map[string]any{"NetworkID": float64(0)}},
+			},
+			worse: device.ContainerDevices{
+				{Type: "Ascend910B", CustomInfo: map[string]any{"NetworkID": float64(0)}},
+				{Type: "Ascend910B", CustomInfo: map[string]any{"NetworkID": float64(1)}},
+			},
+		},
+		{
+			name:    "vastai prefers devices on one AIC",
+			devType: vastai.VastaiDevice,
+			dev:     vastai.InitVastaiDevice(vastai.VastaiConfig{}),
+			better: device.ContainerDevices{
+				{Type: vastai.VastaiDevice, CustomInfo: map[string]any{"AIC": "0"}},
+				{Type: vastai.VastaiDevice, CustomInfo: map[string]any{"AIC": "0"}},
+			},
+			worse: device.ContainerDevices{
+				{Type: vastai.VastaiDevice, CustomInfo: map[string]any{"AIC": "0"}},
+				{Type: vastai.VastaiDevice, CustomInfo: map[string]any{"AIC": "1"}},
+			},
+		},
+		{
+			name:    "kunlun prefers devices inside one interconnect group",
+			devType: kunlun.KunlunGPUDevice,
+			dev:     kunlun.InitKunlunDevice(kunlun.KunlunConfig{}),
+			better: device.ContainerDevices{
+				{Type: kunlun.KunlunGPUDevice, Idx: 0}, {Type: kunlun.KunlunGPUDevice, Idx: 1},
+				{Type: kunlun.KunlunGPUDevice, Idx: 2}, {Type: kunlun.KunlunGPUDevice, Idx: 3},
+			},
+			worse: device.ContainerDevices{
+				{Type: kunlun.KunlunGPUDevice, Idx: 0}, {Type: kunlun.KunlunGPUDevice, Idx: 4},
+			},
+		},
+	}
+
+	newNode := func(name, devType string, devs device.ContainerDevices) *NodeScore {
+		return &NodeScore{
+			NodeID:  name,
+			Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}},
+			Devices: device.PodDevices{devType: device.PodSingleDevice{devs}},
+			// Both nodes carry the same base score, so only topology decides.
+			Score: 10,
+		}
+	}
+
+	original := device.DevicesMap
+	defer func() { device.DevicesMap = original }()
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			device.DevicesMap = map[string]device.Devices{test.devType: test.dev}
+
+			for _, policy := range []string{
+				util.NodeSchedulerPolicyBinpack.String(),
+				util.NodeSchedulerPolicySpread.String(),
+			} {
+				better := newNode("better-topology", test.devType, test.better)
+				worse := newNode("worse-topology", test.devType, test.worse)
+				better.OverrideScore(nil, policy)
+				worse.OverrideScore(nil, policy)
+
+				// Mirror the scheduler: sort the list and take the last entry.
+				list := NodeScoreList{Policy: policy, NodeList: []*NodeScore{worse, better}}
+				sort.Sort(list)
+				picked := list.NodeList[len(list.NodeList)-1]
+
+				assert.Equal(t, "better-topology", picked.NodeID,
+					"policy %s picked the wrong node", policy)
 			}
 		})
 	}
