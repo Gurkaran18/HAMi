@@ -2953,3 +2953,16 @@ func TestFit_CoresValidation(t *testing.T) {
 		assert.Equal(t, reason, "core limit out of range")
 	})
 }
+
+// TestDevicesImplementsPolicyNeutralScorer ensures the Ascend backend exposes
+// the PolicyNeutralScore marker method, which is how the shared policy layer
+// discovers that ScoreNode is policy-independent and must be weighted.
+func TestDevicesImplementsPolicyNeutralScorer(t *testing.T) {
+	type policyNeutralScorer interface {
+		PolicyNeutralScore()
+	}
+	var dev device.Devices = &Devices{}
+	if _, ok := dev.(policyNeutralScorer); !ok {
+		t.Errorf("ascend Devices does not implement the PolicyNeutralScore marker")
+	}
+}

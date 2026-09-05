@@ -2296,7 +2296,10 @@ func Test_calcScore(t *testing.T) {
 									},
 								},
 							},
-							Score: 1006.25,
+							// Kunlun opts into PolicyNeutralScore, so OverrideScore applies
+							// the shared 10000 weight to its topology score: 6.25 base +
+							// 10000 * 1000 topology.
+							Score: 10000006.25,
 						},
 					},
 				},
@@ -2667,7 +2670,8 @@ func Test_calcScore(t *testing.T) {
 									},
 								},
 							},
-							Score: 1000,
+							// 0 base + 10000 * 1000 topology, see the note above.
+							Score: 10000000,
 						},
 						{
 							NodeID: "node2",
@@ -2693,7 +2697,8 @@ func Test_calcScore(t *testing.T) {
 									},
 								},
 							},
-							Score: 2006.25,
+							// 6.25 base + 10000 * 2000 topology, see the note above.
+							Score: 20000006.25,
 						},
 					},
 				},

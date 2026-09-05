@@ -1116,3 +1116,16 @@ func TestComputeBestCombination(t *testing.T) {
 		})
 	}
 }
+
+// TestVastaiDevicesImplementsPolicyNeutralScorer ensures VastaiDevices exposes
+// the PolicyNeutralScore marker method, which is how the shared policy layer
+// discovers that ScoreNode is policy-independent and must be weighted.
+func TestVastaiDevicesImplementsPolicyNeutralScorer(t *testing.T) {
+	type policyNeutralScorer interface {
+		PolicyNeutralScore()
+	}
+	var dev device.Devices = &VastaiDevices{}
+	if _, ok := dev.(policyNeutralScorer); !ok {
+		t.Errorf("VastaiDevices does not implement the PolicyNeutralScore marker")
+	}
+}

@@ -745,3 +745,16 @@ func TestKunlunVDevices_Fit_UUIDAnnotations(t *testing.T) {
 	assert.Equal(t, fit, false)
 	assert.Assert(t, strings.Contains(reason, common.CardUUIDMismatch))
 }
+
+// TestKunlunDevicesImplementsPolicyNeutralScorer ensures KunlunDevices exposes
+// the PolicyNeutralScore marker method, which is how the shared policy layer
+// discovers that ScoreNode is policy-independent and must be weighted.
+func TestKunlunDevicesImplementsPolicyNeutralScorer(t *testing.T) {
+	type policyNeutralScorer interface {
+		PolicyNeutralScore()
+	}
+	var dev device.Devices = &KunlunDevices{}
+	if _, ok := dev.(policyNeutralScorer); !ok {
+		t.Errorf("KunlunDevices does not implement the PolicyNeutralScore marker")
+	}
+}

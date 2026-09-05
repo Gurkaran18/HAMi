@@ -179,6 +179,11 @@ func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices device.PodSing
 	return calcscore(prev, current)
 }
 
+// PolicyNeutralScore marks KunlunDevices as returning a policy-independent
+// score from ScoreNode, so the shared scheduler policy layer owns the weighting
+// and Spread-policy sign inversion.
+func (dev *KunlunDevices) PolicyNeutralScore() {}
+
 func (dev *KunlunDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
 	return nil

@@ -209,6 +209,11 @@ func (dev *VastaiDevices) ScoreNode(node *corev1.Node, podDevices device.PodSing
 	return score
 }
 
+// PolicyNeutralScore marks VastaiDevices as returning a policy-independent
+// score from ScoreNode, so the shared scheduler policy layer owns the weighting
+// and Spread-policy sign inversion.
+func (dev *VastaiDevices) PolicyNeutralScore() {}
+
 func (dev *VastaiDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
